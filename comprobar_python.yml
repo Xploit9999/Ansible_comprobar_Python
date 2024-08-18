@@ -1,0 +1,57 @@
+---
+- set_fact:
+    usar_raw: false
+
+- name: Python ??? | Valida versiones de Python en el servidor
+  raw: | 
+    if [[ -x /usr/bin/python ]]; then
+      python -V 2>&1 | awk '{printf "%.1f\n",$2}'
+    else
+      python3 -V 2>&1 | awk '{printf "%.1f\n",$2}'
+    fi
+  register: version_actual
+
+- debug:
+    msg: "{{ version_actual.stdout | regex_replace('[^0-9]','') }}"
+
+- name: Python ??? | Bloque si se encuentra que Python tiene una versión por debajo de la 2.6
+  block:
+  - name: Python ??? | Encuentra mas version de Python si las hay en el server
+    raw: find /usr -type f -perm 0755 -name 'python*' 2>/dev/null | egrep 'python[23]\.[0-9]+$'
+    register: python
+    timeout: 30
+
+  - name: Python ??? | Setea la versión de Python mas alta encontrada en el servidor
+    set_fact:
+      python_version: "{{ python.stdout_lines | map('regex_replace', '.*python([0-9]+\\.[0-9]+).*', '\\1') | list | sort | reverse | first }}"
+
+  - name: Python ??? | Selecciona la versión mas alta encontrada
+    set_fact:
+      select_version: "{{ python.stdout_lines | select('match', '.*python' + python_version) }}"
+
+  - name: Python ??? | Setea la version de Python mas alta como interprete
+    set_fact:
+      ansible_python_interpreter: "{{ select_version | join }}"
+
+  - name: Python ??? | Comprueba si se debe de usar el modulo raw (crudo) en caso de que la vrsion de Python encontrada sea obsoleta
+    set_fact:
+      usar_raw: "{{ 'true' if python_version is defined and python_version | float < 2.6 else 'false' }}"
+
+  rescue:
+  
+  - name: Python ??? | En caso de fallar encontrado mas versiones de Python, setea por defecto el uso de raw.
+    set_fact:
+      usar_raw: true
+
+  when: version_actual.stdout | regex_replace('[^0-9.]','') | float < 2.6
+
+- name: Python ??? | Mensaje de comprobación si se debe de usar raw
+  debug:
+    msg: "Versión de Python no compatible. Debes de usar RAW"
+  when: usar_raw
+
+- name: Python ??? | Mensaje de comprobación si puede usar modulos normales
+  debug:
+    msg: "Versión de Python compatible. Usar modulos normales."
+  when: not usar_raw  
+...
