@@ -1,57 +1,48 @@
 ---
-- set_fact:
-    usar_raw: false
-
-- name: Python ??? | Valida versiones de Python en el servidor
-  raw: | 
+- name: Python version | 1. Valida version del interprete de Python actual
+  raw: |
     if [[ -x /usr/bin/python ]]; then
-      python -V 2>&1 | awk '{printf "%.1f\n",$2}'
+      python -V 2>&1 | awk '{print $2}'
     else
-      python3 -V 2>&1 | awk '{printf "%.1f\n",$2}'
+      python3 -V 2>&1 | awk '{print $2}'
     fi
   register: version_actual
 
-- debug:
-    msg: "{{ version_actual.stdout | regex_replace('[^0-9]','') }}"
+- name:  Python version | 2.- Obtener version python
+  set_fact:
+    python_version_actual:  "{{ version_actual.stdout | regex_search('[2-9].[1-9][.1-9\\s]*', multiline=True)  | replace('\r','') | replace('\n','') | regex_replace('[^0-9.]','') | trim }}"
 
-- name: Python ??? | Bloque si se encuentra que Python tiene una versión por debajo de la 2.6
+- name: Python version | 3. Bloque si la version actual de Python en inferior a 2.6.9
   block:
-  - name: Python ??? | Encuentra mas version de Python si las hay en el server
+
+  - name: Python version | 3.1 Encuentra versiones de python en el servidor
     raw: find /usr -type f -perm 0755 -name 'python*' 2>/dev/null | egrep 'python[23]\.[0-9]+$'
     register: python
-    timeout: 30
 
-  - name: Python ??? | Setea la versión de Python mas alta encontrada en el servidor
+  - name: Python version | 3.2 Remueve ruta absoluta y organiza de mayor a menor la version, deja solo la primera coincidencia
     set_fact:
-      python_version: "{{ python.stdout_lines | map('regex_replace', '.*python([0-9]+\\.[0-9]+).*', '\\1') | list | sort | reverse | first }}"
+      python_version: "{{ python.stdout_lines | map('regex_replace', '.python([0-9]+\\.[0-9]+).', '\\1') | list | sort | reverse | first }}"
 
-  - name: Python ??? | Selecciona la versión mas alta encontrada
+  - name: Python version | 3.3 Selecciona la version mas alta de Python que se encontro en el servidor con la ruta absoluta
     set_fact:
-      select_version: "{{ python.stdout_lines | select('match', '.*python' + python_version) }}"
+      #select_version: "{{ python.stdout | select('match', '*python' + python_version) }}" 
+      select_version: "{{ python.stdout | regex_search( '[/a-z]python[1-9.]' + python_version , multiline=True) | replace('\r','') | replace('\n','') }}" 
 
-  - name: Python ??? | Setea la version de Python mas alta como interprete
+  - name: Python version | 3.4 Setea variable de ansible para que reconozca el interprete de Python mas actual en el servidor
     set_fact:
       ansible_python_interpreter: "{{ select_version | join }}"
+      python_version_actual: "{{ python_version }}"
 
-  - name: Python ??? | Comprueba si se debe de usar el modulo raw (crudo) en caso de que la vrsion de Python encontrada sea obsoleta
-    set_fact:
-      usar_raw: "{{ 'true' if python_version is defined and python_version | float < 2.6 else 'false' }}"
+  when: python_version_actual !="" and python_version_actual < "2.6.9"
+      
+- name: Python version | 4. Valida si es necesario usar el modulo de raw, en caso de que el interprete sea inferior a 2.6.9
+  set_fact:
+    usar_raw: "{{ true if (  python_version_actual =='' or python_version_actual < '2.6.9' ) else false | bool }}"
 
-  rescue:
-  
-  - name: Python ??? | En caso de fallar encontrado mas versiones de Python, setea por defecto el uso de raw.
-    set_fact:
-      usar_raw: true
-
-  when: version_actual.stdout | regex_replace('[^0-9.]','') | float < 2.6
-
-- name: Python ??? | Mensaje de comprobación si se debe de usar raw
+- name:   Python version | 5. Mostrar version actual de python
   debug:
-    msg: "Versión de Python no compatible. Debes de usar RAW"
-  when: usar_raw
+    var: python_version_actual
 
-- name: Python ??? | Mensaje de comprobación si puede usar modulos normales
+- name:   Python version | 7.- Mostrar si usa raw
   debug:
-    msg: "Versión de Python compatible. Usar modulos normales."
-  when: not usar_raw  
-...
+    var: usar_raw
